@@ -1,5 +1,5 @@
 from PyQt6.QtCore import QElapsedTimer, QPoint, QPointF, QSize, QTimer, Qt
-from PyQt6.QtGui import QAction, QIcon, QPainter
+from PyQt6.QtGui import QAction, QColor, QFont, QGuiApplication, QIcon, QPainter, QPalette
 from PyQt6.QtWidgets import QApplication, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QSlider, QSpinBox, QVBoxLayout, QWidget
 import sys, os, random, json
 
@@ -76,7 +76,6 @@ class GameFrame(QFrame):
         self.running = False
         self.paused = False
         self.finished = False
-        self.count = 0
 
         self.frame_timer = QElapsedTimer()
         self.frame_timer.start()
@@ -104,6 +103,8 @@ class GameFrame(QFrame):
 
     def reload(self):
         self.buf = list(start_money_values)
+        self.finished = False
+        self.moneys = []
 
         self.persons = {}
         for i in range(10):
@@ -136,7 +137,6 @@ class GameFrame(QFrame):
             return
 
         available = [i for i, value in enumerate(self.buf) if value < 10 ]
-
         if not available:
             self.finished = True
             return
@@ -145,11 +145,6 @@ class GameFrame(QFrame):
 
         self.moneys.append(Money(i))
         self.buf[i] += 1
-
-        if self.buf[i] >= 10:
-            self.count += 1
-
-        self.finished = self.count >= 10
 
     def animations(self):
         delta = self.frame_timer.elapsed()/1000
@@ -173,7 +168,7 @@ class GameFrame(QFrame):
         self.btn_start.setText("Старт")
         self.btn_pause.setDisabled(True)
         self.set_pause(False)
-        self.moneys = []
+        self.reload()
 
         if self.running:
             self.btn_pause.setDisabled(False)
@@ -208,13 +203,14 @@ class MainWindow(QMainWindow):
         self.load_file = menu_file.addAction('Сохранить', self.load_sett)
         self.exit_file = menu_file.addAction('Выход', self.close)
 
-
         self.menu_settings = menubar.addMenu('Настройки')
+        self.menu_settings.addAction('Выбор флагов', self.open_flags)
+        self.menu_settings.addAction('Начальные условия', self.open_ic)
 
-        self.flags_action =  self.menu_settings.addAction('Выбор флагов', self.open_flags)
-        self.ic_action = self.menu_settings.addAction('Начальные условия', self.open_ic)
+        menu_help = menubar.addMenu('Справка')
 
-        menu_help = menubar.addMenu('Помощь')
+        menu_help.addAction('О программе', self.open_about)
+        menu_help.addAction('Об авторе', self.open_dev)
 
         # Основные виджеты
         central_widget = QWidget()
@@ -225,7 +221,6 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.game)
 
         # Управление
-
         controls_container = QWidget()
         controls_layout = QHBoxLayout(controls_container)
 
@@ -262,7 +257,7 @@ class MainWindow(QMainWindow):
 
         self.anim_timer = QTimer(self)
         self.anim_timer.timeout.connect(self.game.animations)
-        self.anim_timer.start(8)
+        self.anim_timer.start(5)
 
         self.update_value(1)
 
@@ -349,6 +344,15 @@ class MainWindow(QMainWindow):
 
     def open_ic(self):
         window = ICWindow()
+        window.exec()
+        self.game.reload()
+
+    def open_about(self):
+        window = AboutApp()
+        window.exec()
+
+    def open_dev(self):
+        window = AboutDev()
         window.exec()
 
 
@@ -556,9 +560,86 @@ class ICWindow(QDialog):
         start_money_values = list(self.buf)
         self.close()
 
+class AboutApp(QDialog):
+    def __init__(self):
+        super().__init__()
+
+        self.setWindowTitle("О программе")
+        self.setFixedSize(600, 280)
+
+        self.info_label = QLabel(
+            "Программа «Биткоины» представляет собой\n интерактивную симуляцию накопления монет.\n"
+            "Разработка выполнена на языке Python с использованием библиотеки PyQt6.\n"
+            "Основной функционал включает анимацию падающих сверху вниз монет.\n"
+            "Пользователь может выбирать флаги различных стран для персонажей.\n"
+            "Возможность настройки начального количества монет у каждого персонажа.\n"
+            "Скорость симуляции регулируется ползунком в нижней части главного окна.\n"
+            "Программа поддерживает сохранение и загрузку настроек.\n"
+            "Меню «Настройки» позволяет управлять персонажами и начальными условиями.\n"
+            "Проект представляет собой учебную лабораторную работу по ТАФТУ.\n"
+        )
+        font = QFont("Arial", 11)
+        self.info_label.setFont(font)
+        self.info_label.setAlignment(
+            Qt.AlignmentFlag.AlignCenter
+        )
+
+        self.ok_button = QPushButton("OK")
+        self.ok_button.setFixedSize(110, 36)
+        self.ok_button.clicked.connect(self.accept)
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        button_layout.addWidget(self.ok_button)
+        button_layout.addStretch()
+
+        layout = QVBoxLayout(self)
+        layout.addStretch()
+        layout.addWidget(self.info_label)
+        layout.addStretch()
+        layout.addLayout(button_layout)
+        layout.addSpacing(10)
+
+
+class AboutDev(QDialog):
+    def __init__(self):
+        super().__init__()
+
+        self.setWindowTitle("О разработчике")
+        self.setFixedSize(420, 230)
+
+        self.info_label = QLabel(
+            "Разработчик: Бачурин М. Ф.\n"
+            "Группа: ИВТб-2305\n"
+            "Год: 2026"
+        )
+        font = QFont("Arial", 16)
+        self.info_label.setFont(font)
+        self.info_label.setAlignment(
+            Qt.AlignmentFlag.AlignCenter
+        )
+
+        self.ok_button = QPushButton("OK")
+        self.ok_button.setFixedSize(110, 36)
+        self.ok_button.clicked.connect(self.accept)
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        button_layout.addWidget(self.ok_button)
+        button_layout.addStretch()
+
+        layout = QVBoxLayout(self)
+        layout.addStretch()
+        layout.addWidget(self.info_label)
+        layout.addStretch()
+        layout.addLayout(button_layout)
+        layout.addSpacing(10)
+
 
 def main():
     app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    QGuiApplication.styleHints().setColorScheme(Qt.ColorScheme.Dark)
     window = MainWindow()
     window.show()
 
