@@ -1,0 +1,336 @@
+from PyQt6.QtCore import QPoint, QTimer, Qt
+from PyQt6.QtGui import QAction, QIcon
+from PyQt6.QtWidgets import QApplication, QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QSlider, QVBoxLayout, QWidget
+import sys
+import random
+
+MIN_SPEED: int = 0
+MAX_SPEED: int = 100
+
+DELTA: int = 16
+
+# Скорость падения монетки в пикселях/сек
+SPEED: int = 50
+
+
+class Money:
+    def __init__(self, x0: int, y0: int):
+        self.pos = QPoint(x0, y0)
+
+    def tick(self, delta: float):
+        self.pos.setY(int(SPEED * delta))
+
+
+class GameFrame(QFrame):
+    def __init__(self, n: int, m: int):
+        self.speed = MIN_SPEED
+        self.running = False
+        self.paused = False
+        self.finished = False
+        # Количество человечков
+        self.n = n
+        # Размер кошелька
+        self.m = m
+        self.delta = 1 / DELTA
+        # Массив со всеми монетками
+        self.citizens = [0]*n
+
+        # Массив c состояниями анимаций
+        self.moneys: list[Money] = []
+
+        super().__init__()
+        self.setFixedSize(690, 400)
+        self.state_label = QLabel()
+        self.setStyleSheet("background-color: #262626;")
+        self.setAutoFillBackground(True)
+
+        self.btn_start = QPushButton("Старт")
+        self.btn_pause = QPushButton("Пауза")
+        self.btn_pause.setDisabled(True)
+
+        self.btn_close = QPushButton("Выход")
+
+        layout = QVBoxLayout()
+        layout.setContentsMargins(2, 2, 2, 2)
+
+        self.setLayout(layout)
+
+    def tick(self):
+        if self.paused or not(self.running):
+            return
+
+        # логика и анимация
+        print("tick")
+
+
+    def animations(self):
+        for m in self.moneys:
+            m.tick(self.delta)
+
+    def start(self):
+        self.running = not(self.running)
+        self.btn_start.setText("Старт")
+        self.btn_pause.setDisabled(True)
+        self.set_pause(False)
+
+        if self.running:
+            self.btn_pause.setDisabled(False)
+            self.btn_start.setText("Стоп")
+
+
+    def set_pause(self, paused: bool):
+        self.paused = not(paused)
+        self.pause()
+
+    def pause(self):
+        self.paused = not(self.paused)
+        self.state_label.setText('')
+        self.btn_pause.setText("Пауза")
+        if self.paused:
+            self.state_label.setText("На паузе")
+            self.btn_pause.setText("Продолжить")
+
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+
+        self.tickspeed = 1000
+        self.setWindowTitle("Монетки. Лабораторная 1")
+        self.setFixedSize(710, 500)
+
+        # Верхнее меню
+        menubar = self.menuBar()
+        menu_file = menubar.addMenu('Файл')
+
+        self.menu_settings = menubar.addMenu('Настройки')
+
+        self.flags_action =  self.menu_settings.addAction('Выбор флагов', open_flags)
+        self.ic_action = self.menu_settings.addAction('Начальные условия', open_initial_cond)
+
+        menu_help = menubar.addMenu('Помощь')
+
+        # Основные виджеты
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QVBoxLayout(central_widget)
+        self.game = GameFrame(10, 10)
+
+        main_layout.addWidget(self.game)
+
+        # Управление
+
+        controls_container = QWidget()
+        controls_layout = QHBoxLayout(controls_container)
+
+        self.speed_slider = QSlider(Qt.Orientation.Horizontal)
+        self.speed_slider.setFixedWidth(100)
+        self.speed_slider.setRange(MIN_SPEED, MAX_SPEED)
+        self.speed_slider.valueChanged.connect(self.update_value)
+
+        self.speed_field = QLineEdit(self)
+        self.speed_field.textEdited.connect(self.set_value)
+        self.speed_field.setFixedWidth(50);
+
+        self.game.btn_close.clicked.connect(self.close)
+        self.game.btn_start.clicked.connect(self.start)
+        self.game.btn_pause.clicked.connect(self.game.pause)
+
+        controls_layout.addWidget(self.game.state_label)
+        controls_layout.addStretch()
+        controls_layout.addWidget(QLabel("Скорость:"))
+        controls_layout.addWidget(self.speed_slider)
+        controls_layout.addSpacing(5)
+        controls_layout.addWidget(self.speed_field)
+        controls_layout.addSpacing(20)
+        controls_layout.addWidget(self.game.btn_start)
+        controls_layout.addWidget(self.game.btn_pause)
+        controls_layout.addWidget(self.game.btn_close)
+
+        main_layout.addWidget(controls_container, 0, Qt.AlignmentFlag.AlignBottom)
+
+        # Run game loop
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.game.tick)
+        self.timer.start(self.tickspeed)
+
+        self.anim_timer = QTimer(self)
+        self.anim_timer.timeout.connect(self.game.animations)
+        self.anim_timer.start(DELTA)
+
+        self.update_value(1)
+
+    def start(self):
+        self.game.start()
+        self.menu_settings.setDisabled(False)
+        if self.game.running:
+            self.menu_settings.setDisabled(True)
+
+    def update_value(self, value: int):
+        self.game.speed = value
+        self.speed_field.setText(str(self.game.speed))
+
+        if value != 0:
+            x = value**(0.349)
+            t = int(self.tickspeed / x)
+            self.timer.setInterval(t)
+
+    def set_value(self, text: str):
+        try:
+            if not text:
+                self.update_value(MIN_SPEED)
+                return
+
+            if not text.isdigit():
+                raise ValueError("Неправильный символ, разрешены только цифры (0-9)")
+
+            v = int(text)
+            if len(text) > 1 and text.startswith('0') and self.game.speed != 0 and v != 0:
+                raise ValueError("Ведущие нули не разрешены")
+
+            val = max(min(v, MAX_SPEED), MIN_SPEED)
+            self.update_value(val)
+            self.speed_slider.setValue(self.game.speed)
+
+        except ValueError as e:
+            msg = QMessageBox(self)
+            msg.setStandardButtons(QMessageBox.StandardButton.NoButton)
+            msg.setIcon(QMessageBox.Icon.Critical)
+            msg.setWindowTitle("Ошибка")
+            msg.setText(f"Ошибка ввода! \n{e}")
+            msg.show()
+
+            self.update_value(self.game.speed)
+            QTimer.singleShot(500, msg.accept)
+
+flags_ops = {
+    "Россия": "russia.svg",
+    "Китай": "china.svg",
+    "Бангладеш": "bangladesh.svg",
+    "Бразилия": "brazil.svg",
+    "Египет": "egypt.svg",
+    "Эфиопия": "ethiopia.svg",
+    "Индия": "india.svg",
+    "Индонезия": "indonesia.svg",
+    "США": "usa.svg",
+    "Мексика": "mexico.svg",
+    "ДР Конго": "dr_congo.svg",
+    "Нигерия": "nigeria.svg",
+    "Пакистан": "pakistan.svg",
+    "Филиппины": "philippines.svg",
+    "Вьетнам": "vietnam.svg"
+}
+flag_keys = list(flags_ops.keys())
+
+# First 10 indices are current choose
+current_flags = list(range(15))
+
+
+class FlagsWindow(QDialog):
+    def __init__(self):
+        super().__init__()
+
+        self.setWindowTitle("Выбор флагов")
+        self.setFixedSize(500, 500)
+
+        self.buf = list(current_flags)
+        layout = QVBoxLayout()
+
+        self.combo: list[QComboBox] = [QComboBox()]*10
+        for idx in range(10):
+            self.combo[idx] = QComboBox()
+            self.combo[idx].addItems(flag_keys)
+            self.combo[idx].currentTextChanged.connect(lambda text, i=idx: self.set(text, i))
+            layout.addWidget(self.combo[idx])
+            for j in range(15):
+                path = flags_ops[flag_keys[j]]
+                self.combo[idx].setItemIcon(j, QIcon('./assets/' + path))
+
+
+        self.update_combos()
+
+        # Виджеты и настройки
+        buttons_container = QWidget()
+        buttons_layout = QHBoxLayout(buttons_container)
+
+        self.btn_cancel = QPushButton("Отмена")
+        self.btn_cancel.setFixedWidth(80)
+        self.btn_cancel.clicked.connect(self.close)
+
+        self.btn_reset = QPushButton("Сброс")
+        self.btn_reset.setFixedWidth(80)
+        self.btn_reset.clicked.connect(self.reset)
+
+        self.btn_random = QPushButton("Случайно")
+        self.btn_random.setFixedWidth(80)
+        self.btn_random.clicked.connect(self.shuffle)
+
+        self.btn_close = QPushButton("Закрыть")
+        self.btn_close.setFixedWidth(80)
+        self.btn_close.clicked.connect(self.save)
+
+        buttons_layout.addWidget(self.btn_cancel)
+        buttons_layout.addWidget(self.btn_reset)
+        buttons_layout.addWidget(self.btn_random)
+        buttons_layout.addWidget(self.btn_close)
+
+        layout.addWidget(buttons_container, 0, Qt.AlignmentFlag.AlignBottom)
+
+        self.setLayout(layout)
+
+    def set(self, key: str, idx: int):
+        i = flag_keys.index(key)
+        p = self.buf.index(i)
+
+        print(key, i, idx, p)
+        if p == idx:
+            return
+
+        self.buf[p], self.buf[idx] = self.buf[idx], self.buf[p]
+        self.update_combos()
+
+    def reset(self):
+        self.buf = list(range(15))
+        self.update_combos()
+
+    def shuffle(self):
+        random.shuffle(self.buf)
+        self.update_combos()
+
+    def update_combos(self):
+        for c in range(10):
+            self.combo[c].setCurrentIndex(self.buf[c])
+            key = flag_keys[self.buf[c]]
+            path = flags_ops[key]
+
+    def save(self):
+        global current_flags
+        current_flags = self.buf
+        self.close()
+
+class ICWindow(QDialog):
+    def __init__(self):
+        super().__init__()
+
+        self.setWindowTitle("Начальные условия")
+        self.setFixedSize(300, 300)
+
+def open_flags():
+    window = FlagsWindow()
+    window.exec()
+
+
+def open_initial_cond():
+    window = ICWindow()
+    window.exec()
+
+
+def main():
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+
+    sys.exit(app.exec())
+
+if __name__ == "__main__":
+    main()
