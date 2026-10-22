@@ -1,1 +1,1 @@
-pyinstaller --onefile --noconsole main.py
+pyinstaller --onefile --noconsole --add-data "./assets;assets" main.py
