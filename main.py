@@ -1,16 +1,12 @@
-from PyQt6.QtCore import QPoint, QTimer, Qt
-from PyQt6.QtGui import QAction, QIcon
+from PyQt6.QtCore import QElapsedTimer, QPoint, QPointF, QSize, QTimer, Qt
+from PyQt6.QtGui import QAction, QIcon, QPainter
 from PyQt6.QtWidgets import QApplication, QComboBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QPushButton, QSlider, QSpinBox, QVBoxLayout, QWidget
 import sys, os, random, json
 
 MIN_SPEED: int = 0
 MAX_SPEED: int = 100
 
-DELTA: int = 16
-
-# Скорость падения монетки в пикселях/сек
-SPEED: int = 50
-
+# Загрузка файлов с диска
 def resource(relative: str):
     try:
         base_path = sys._MEIPASS
@@ -19,33 +15,78 @@ def resource(relative: str):
 
     return os.path.join(base_path, relative)
 
+COIN_SIZE = 32
+MONEY_ICON = QIcon(resource(os.path.join("assets", "money.svg")))
+MONEY_PIXMAP = None
+
+PERSON_SIZE = 125
+PERSON_PIXMAP = None
+
+MIN_Y = 50
+MAX_Y = 280
+
 class Money:
-    def __init__(self, x0: int, y0: int):
-        self.pos = QPoint(x0, y0)
+    def __init__(self, idx: int):
+        self.idx = idx
+        self.pos = QPointF(x_from_idx(idx), MIN_Y)
+        self.speed = 0
 
     def tick(self, delta: float):
-        self.pos.setY(int(SPEED * delta))
+        y = self.pos.y() + self.speed * delta
+        self.speed += MAX_Y * delta
+        self.pos.setY(y)
 
+    def is_end(self) -> bool:
+        return self.pos.y() > MAX_Y
+
+    def draw(self, painter: QPainter):
+        painter.drawPixmap(self.pos, MONEY_PIXMAP)
+
+def x_from_idx(idx: int) -> int:
+    return 20 + idx*70
+
+def svg_to_pixmap(svg_path: str, width: int, height: int) -> QPixmap:
+    icon = QIcon(resource(os.path.join("assets", svg_path)))
+    return icon.pixmap(QSize(width, height))
+
+class Person:
+    def __init__(self, value: int, idx: int, flag: int):
+        self.wallet = value
+        self.idx = idx
+        x = x_from_idx(idx)
+        self.pos = QPointF(x-45, MAX_Y-40)
+        self.flag_pos = QPointF(x, MAX_Y+94)
+        key = flag_keys[flag]
+        self.flag_pixmap = svg_to_pixmap(flags_ops[key], 32, 32)
+
+    def draw(self, painter: QPainter):
+        painter.drawPixmap(self.pos, PERSON_PIXMAP)
+        painter.drawPixmap(self.flag_pos, self.flag_pixmap)
+
+        tx = int(self.pos.x()) + 60
+        ty = int(self.pos.y())
+        painter.drawText(tx, ty, f"{self.wallet}")
 
 class GameFrame(QFrame):
-    def __init__(self, n: int, m: int):
+    def __init__(self):
+        super().__init__()
+        self.setFixedSize(710, 400)
+
         self.speed = MIN_SPEED
         self.running = False
         self.paused = False
         self.finished = False
-        # Количество человечков
-        self.n = n
-        # Размер кошелька
-        self.m = m
-        self.delta = 1 / DELTA
-        # Массив со всеми монетками
-        self.citizens = [0]*n
+        self.count = 0
+
+        self.frame_timer = QElapsedTimer()
+        self.frame_timer.start()
+
+        # Массив с состояниями человечков
+        self.reload()
 
         # Массив c состояниями анимаций
         self.moneys: list[Money] = []
 
-        super().__init__()
-        self.setFixedSize(690, 400)
         self.state_label = QLabel()
         self.setStyleSheet("background-color: #262626;")
         self.setAutoFillBackground(True)
@@ -61,28 +102,82 @@ class GameFrame(QFrame):
 
         self.setLayout(layout)
 
+    def reload(self):
+        self.buf = list(start_money_values)
+
+        self.persons = {}
+        for i in range(10):
+            p = Person(start_money_values[i], i, current_flags[i])
+            self.persons[i] = p
+
+    def paintEvent(self, event):
+        global MONEY_PIXMAP, PERSON_PIXMAP
+
+        super().paintEvent(event)
+        if not(MONEY_PIXMAP):
+            MONEY_PIXMAP = MONEY_ICON.pixmap(COIN_SIZE, COIN_SIZE)
+
+        if not(PERSON_PIXMAP):
+            icon = QIcon(resource(os.path.join("assets", "person.png")))
+            PERSON_PIXMAP = icon.pixmap(PERSON_SIZE, PERSON_SIZE)
+
+        painter = QPainter(self)
+
+        for p in self.persons.values():
+            p.draw(painter)
+
+        for money in self.moneys:
+            money.draw(painter)
+
+        painter.end()
+
     def tick(self):
-        if self.paused or not(self.running):
+        if self.paused or self.finished or not self.running or self.speed == 0:
             return
 
-        # логика и анимация
-        print("tick")
+        available = [i for i, value in enumerate(self.buf) if value < 10 ]
 
+        if not available:
+            self.finished = True
+            return
+
+        i = random.choice(available)
+
+        self.moneys.append(Money(i))
+        self.buf[i] += 1
+
+        if self.buf[i] >= 10:
+            self.count += 1
+
+        self.finished = self.count >= 10
 
     def animations(self):
+        delta = self.frame_timer.elapsed()/1000
+        self.frame_timer.restart()
+
+        if self.paused:
+            return
+
+        self.update()
+        c = 0
         for m in self.moneys:
-            m.tick(self.delta)
+            m.tick(delta)
+            if m.is_end():
+                c += 1
+                self.persons[m.idx].wallet += 1
+
+        self.moneys = self.moneys[c:]
 
     def start(self):
         self.running = not(self.running)
         self.btn_start.setText("Старт")
         self.btn_pause.setDisabled(True)
         self.set_pause(False)
+        self.moneys = []
 
         if self.running:
             self.btn_pause.setDisabled(False)
             self.btn_start.setText("Стоп")
-
 
     def set_pause(self, paused: bool):
         self.paused = not(paused)
@@ -102,8 +197,8 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self.tickspeed = 1000
-        self.setWindowTitle("Монетки. Лабораторная 1")
-        self.setFixedSize(710, 500)
+        self.setWindowTitle("Биткоины. Лабораторная 1")
+        self.setFixedSize(730, 520)
 
         # Верхнее меню
         menubar = self.menuBar()
@@ -116,8 +211,8 @@ class MainWindow(QMainWindow):
 
         self.menu_settings = menubar.addMenu('Настройки')
 
-        self.flags_action =  self.menu_settings.addAction('Выбор флагов', open_flags)
-        self.ic_action = self.menu_settings.addAction('Начальные условия', open_initial_cond)
+        self.flags_action =  self.menu_settings.addAction('Выбор флагов', self.open_flags)
+        self.ic_action = self.menu_settings.addAction('Начальные условия', self.open_ic)
 
         menu_help = menubar.addMenu('Помощь')
 
@@ -125,7 +220,7 @@ class MainWindow(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
-        self.game = GameFrame(10, 10)
+        self.game = GameFrame()
 
         main_layout.addWidget(self.game)
 
@@ -167,7 +262,7 @@ class MainWindow(QMainWindow):
 
         self.anim_timer = QTimer(self)
         self.anim_timer.timeout.connect(self.game.animations)
-        self.anim_timer.start(DELTA)
+        self.anim_timer.start(8)
 
         self.update_value(1)
 
@@ -247,6 +342,14 @@ class MainWindow(QMainWindow):
             except Exception as e:
                     QMessageBox.critical(self, "Error", f"Не удалось сохранить файл:\n{e}")
 
+    def open_flags(self):
+        window = FlagsWindow()
+        window.exec()
+        self.game.reload()
+
+    def open_ic(self):
+        window = ICWindow()
+        window.exec()
 
 
 def msg_error(parent, text: str):
@@ -281,6 +384,7 @@ flag_keys = list(flags_ops.keys())
 # First 10 indices are current choose
 current_flags = list(range(15))
 start_money_values = list(range(10))
+
 
 class FlagsWindow(QDialog):
     def __init__(self):
@@ -370,6 +474,7 @@ class FlagsWindow(QDialog):
         current_flags = self.buf
         self.close()
 
+
 class ICWindow(QDialog):
     def __init__(self):
         super().__init__()
@@ -450,15 +555,6 @@ class ICWindow(QDialog):
 
         start_money_values = list(self.buf)
         self.close()
-
-def open_flags():
-    window = FlagsWindow()
-    window.exec()
-
-
-def open_initial_cond():
-    window = ICWindow()
-    window.exec()
 
 
 def main():
