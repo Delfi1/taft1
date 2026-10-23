@@ -19,8 +19,12 @@ COIN_SIZE = 32
 MONEY_ICON = QIcon(resource(os.path.join("assets", "money.svg")))
 MONEY_PIXMAP = None
 
+MARK_SIZE = 24
+MARK_ICON = QIcon(resource(os.path.join("assets", "mark.svg")))
+MARK_PIXMAP = None
+
 PERSON_SIZE = 125
-PERSON_PIXMAP = None
+PERSON_PIXMAPS = []
 
 MIN_Y = 50
 MAX_Y = 280
@@ -56,16 +60,26 @@ class Person:
         x = x_from_idx(idx)
         self.pos = QPointF(x-45, MAX_Y-40)
         self.flag_pos = QPointF(x, MAX_Y+94)
+        self.mark_pos = QPointF(x+5, MAX_Y-80)
         key = flag_keys[flag]
         self.flag_pixmap = svg_to_pixmap(flags_ops[key], 32, 32)
 
     def draw(self, painter: QPainter):
-        painter.drawPixmap(self.pos, PERSON_PIXMAP)
+        if self.wallet < 1:
+            painter.drawPixmap(self.pos, PERSON_PIXMAPS[0])
+        elif self.wallet < 5:
+            painter.drawPixmap(self.pos, PERSON_PIXMAPS[1])
+        elif self.wallet < 10:
+            painter.drawPixmap(self.pos, PERSON_PIXMAPS[2])
+        else:
+            painter.drawPixmap(self.pos, PERSON_PIXMAPS[3])
+            painter.drawPixmap(self.mark_pos, MARK_PIXMAP)
+
         painter.drawPixmap(self.flag_pos, self.flag_pixmap)
 
         tx = int(self.pos.x()) + 60
         ty = int(self.pos.y())
-        painter.drawText(tx, ty, f"{self.wallet}")
+        painter.drawText(tx-4, ty, f"{self.wallet}")
 
 class GameFrame(QFrame):
     def __init__(self):
@@ -86,15 +100,16 @@ class GameFrame(QFrame):
         # Массив c состояниями анимаций
         self.moneys: list[Money] = []
 
-        self.state_label = QLabel()
+        self.state_label = QLabel("Не запущено")
         self.setStyleSheet("background-color: #262626;")
         self.setAutoFillBackground(True)
 
         self.btn_start = QPushButton("Старт")
+        self.btn_start.setFixedWidth(80)
         self.btn_pause = QPushButton("Пауза")
-        self.btn_pause.setDisabled(True)
-
+        self.btn_pause.setFixedWidth(80)
         self.btn_close = QPushButton("Выход")
+        self.btn_close.setFixedWidth(80)
 
         layout = QVBoxLayout()
         layout.setContentsMargins(2, 2, 2, 2)
@@ -112,15 +127,19 @@ class GameFrame(QFrame):
             self.persons[i] = p
 
     def paintEvent(self, event):
-        global MONEY_PIXMAP, PERSON_PIXMAP
+        global MONEY_PIXMAP, MARK_PIXMAP, PERSON_PIXMAPS
 
         super().paintEvent(event)
         if not(MONEY_PIXMAP):
             MONEY_PIXMAP = MONEY_ICON.pixmap(COIN_SIZE, COIN_SIZE)
 
-        if not(PERSON_PIXMAP):
-            icon = QIcon(resource(os.path.join("assets", "person.png")))
-            PERSON_PIXMAP = icon.pixmap(PERSON_SIZE, PERSON_SIZE)
+        if not(PERSON_PIXMAPS):
+            for i in range(4):
+                icon = QIcon(resource(os.path.join("assets", f"person{i}.png")))
+
+                PERSON_PIXMAPS.append(icon.pixmap(PERSON_SIZE, PERSON_SIZE))
+
+            MARK_PIXMAP = MARK_ICON.pixmap(MARK_SIZE, MARK_SIZE)
 
         painter = QPainter(self)
 
@@ -138,10 +157,13 @@ class GameFrame(QFrame):
 
         available = [i for i, value in enumerate(self.buf) if value < 10 ]
         if not available:
-            self.finished = True
+            if not self.moneys:
+                self.finished = True
+                msg_info(self, "Конец", "Программа завершена!")
             return
 
-        i = random.choice(available)
+        idx = random.randint(0, 9_999_999) // 1_000_000
+        i = available[idx % len(available)]
 
         self.moneys.append(Money(i))
         self.buf[i] += 1
@@ -166,12 +188,19 @@ class GameFrame(QFrame):
     def start(self):
         self.running = not(self.running)
         self.btn_start.setText("Старт")
-        self.btn_pause.setDisabled(True)
-        self.set_pause(False)
         self.reload()
+        self.update()
+
+        if self.paused:
+            self.state_label.setText("На паузе")
+        else:
+            self.state_label.setText('Не запущено')
 
         if self.running:
-            self.btn_pause.setDisabled(False)
+            if self.paused:
+                self.state_label.setText("На паузе")
+            else:
+                self.state_label.setText('Симуляция')
             self.btn_start.setText("Стоп")
 
     def set_pause(self, paused: bool):
@@ -180,7 +209,11 @@ class GameFrame(QFrame):
 
     def pause(self):
         self.paused = not(self.paused)
-        self.state_label.setText('')
+        if self.running:
+            self.state_label.setText('Симуляция')
+        else:
+            self.state_label.setText('Не запущено')
+
         self.btn_pause.setText("Пауза")
         if self.paused:
             self.state_label.setText("На паузе")
@@ -200,7 +233,7 @@ class MainWindow(QMainWindow):
         menu_file = menubar.addMenu('Файл')
 
         self.save_file = menu_file.addAction('Открыть', self.open_sett)
-        self.load_file = menu_file.addAction('Сохранить', self.load_sett)
+        self.load_file = menu_file.addAction('Сохранить', self.save_sett)
         self.exit_file = menu_file.addAction('Выход', self.close)
 
         self.menu_settings = menubar.addMenu('Настройки')
@@ -280,21 +313,28 @@ class MainWindow(QMainWindow):
         try:
             if not text:
                 self.update_value(MIN_SPEED)
+                self.speed_slider.setValue(self.game.speed)
                 return
 
             if not text.isdigit():
-                raise ValueError("Неправильный символ, разрешены только цифры (0-9)")
+                raise ValueError("Недопустимый символ, разрешены (0-9)")
 
             v = int(text)
-            if len(text) > 1 and text.startswith('0') and self.game.speed != 0 and v != 0:
+
+            if len(text) > 1 and text.startswith('0'):
+                self.game.speed = v
                 raise ValueError("Ведущие нули не разрешены")
 
             val = max(min(v, MAX_SPEED), MIN_SPEED)
+
             self.update_value(val)
             self.speed_slider.setValue(self.game.speed)
 
+            if v > 100:
+                raise ValueError("Интервал допустимых значений от 0 до 100")
+
         except ValueError as e:
-            msg_error(self, f"Ошибка ввода!\n{e}")
+            msg_error(self, "Ошибка ввода!", str(e))
             self.update_value(self.game.speed)
 
     def open_sett(self):
@@ -318,7 +358,9 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Не удалось прочитать файл:\n{e}")
 
-    def load_sett(self):
+            self.game.reload()
+
+    def save_sett(self):
         data = {}
         data["flags"] = current_flags
         data["money"] = start_money_values
@@ -356,15 +398,21 @@ class MainWindow(QMainWindow):
         window.exec()
 
 
-def msg_error(parent, text: str):
+def msg_error(parent, title: str, text: str):
     msg = QMessageBox(parent)
     msg.setStandardButtons(QMessageBox.StandardButton.NoButton)
     msg.setIcon(QMessageBox.Icon.Critical)
-    msg.setWindowTitle("Ошибка")
+    msg.setWindowTitle(title)
     msg.setText(text)
     msg.show()
 
     QTimer.singleShot(500, msg.accept)
+
+def msg_info(parent, title: str, text: str):
+    msg = QMessageBox(parent)
+    msg.setWindowTitle(title)
+    msg.setText(text)
+    msg.exec()
 
 flags_ops = {
     "Россия": "russia.svg",
@@ -384,6 +432,7 @@ flags_ops = {
     "Вьетнам": "vietnam.svg"
 }
 flag_keys = list(flags_ops.keys())
+flag_keys.sort()
 
 # First 10 indices are current choose
 current_flags = list(range(15))
@@ -462,7 +511,7 @@ class FlagsWindow(QDialog):
         self.update_combos()
 
     def reset(self):
-        self.buf = list(range(15))
+        self.buf = list(current_flags)
         self.update_combos()
 
     def shuffle(self):
@@ -536,15 +585,16 @@ class ICWindow(QDialog):
         self.setLayout(layout)
 
     def set(self, v: int, idx: int):
-        if v != 10:
-            self.buf[idx] = v
+        prev = self.buf[idx]
+        self.buf[idx] = v
+        if sum(self.buf) != 100:
             return
 
-        self.spins[idx].setValue(self.buf[idx])
-        msg_error(self, "Начальное количество монет не может быть равно 10!")
+        self.spins[idx].setValue(prev)
+        msg_error(self, "Ошибка начального условия!", "Количество не может быть 10 у всех!")
 
     def reset(self):
-        self.buf = list(range(10))
+        self.buf = list(start_mone_values)
         for i in range(10):
             self.spins[i].setValue(self.buf[i])
 
@@ -576,7 +626,7 @@ class AboutApp(QDialog):
             "Скорость симуляции регулируется ползунком в нижней части главного окна.\n"
             "Программа поддерживает сохранение и загрузку настроек.\n"
             "Меню «Настройки» позволяет управлять персонажами и начальными условиями.\n"
-            "Проект представляет собой учебную лабораторную работу по ТАФТУ.\n"
+            "Проект представляет собой учебную лабораторную работу по ТАВТУ.\n"
         )
         font = QFont("Arial", 11)
         self.info_label.setFont(font)
